@@ -27,18 +27,18 @@ contract CharityFund is Ownable {
     uint256 public immutable timeframe;
     mapping(address => uint256) public donatedAmountFrom;
     bool public isClosed;
-    uint256 private _donatedAmount;
+    uint256 public donatedAmount;
 
     event Withdraw(address indexed sender, uint256 amount);
     event Refund(
         address indexed sender,
         uint256 amount,
-        uint256 newDonatedAmount
+        uint256 newdonatedAmount
     );
     event Donate(
         address indexed sender,
         uint256 amount,
-        uint256 newDonatedAmount
+        uint256 newdonatedAmount
     );
     event Closed(address indexed sender, uint256 amount);
     event FallbackCalled(address indexed sender, uint256 amount);
@@ -73,6 +73,10 @@ contract CharityFund is Ownable {
     modifier onlyForCharityNotFinished() {
         if (isClosed) {
             revert CharityIsFinished(msg.sender);
+        } else if (address(this).balance > targetAmount) {
+            // protect from selfdestructed contract
+            isClosed = true;
+            // emit Closed(msg.sender, msg.value);
         }
         _;
     }
@@ -81,20 +85,22 @@ contract CharityFund is Ownable {
         if (msg.value == 0) {
             revert ZeroDonationAmountError(msg.sender, msg.value);
         }
-        if (_donatedAmount + msg.value > targetAmount) {
+        if (address(this).balance + msg.value > targetAmount) {
             revert FundTargetExceeded(msg.sender, msg.value);
         }
-        _donatedAmount += msg.value;
         donatedAmountFrom[msg.sender] += msg.value;
-        emit Donate(msg.sender, msg.value, _donatedAmount);
-        if (_donatedAmount == targetAmount) {
+        emit Donate(msg.sender, msg.value, donatedAmount);
+        if (address(this).balance == targetAmount) {
             isClosed = true;
             emit Closed(msg.sender, msg.value);
         }
     }
 
     function remainingAmount() public view returns (uint256) {
-        return targetAmount - _donatedAmount;
+        if (isClosed) {
+            return 0;
+        }
+        return targetAmount - donatedAmount;
     }
 
     function isOpen() public view returns (bool) {
@@ -105,9 +111,8 @@ contract CharityFund is Ownable {
         if (isOpen()) {
             revert CharityIsNotFinished(msg.sender);
         }
-        payable(msg.sender).transfer(_donatedAmount);
-        emit Withdraw(msg.sender, _donatedAmount);
-        _donatedAmount = 0;
+        payable(msg.sender).transfer(address(this).balance);
+        emit Withdraw(msg.sender, address(this).balance);
     }
 
     function refund() public onlyForCharityNotFinished {
@@ -115,8 +120,8 @@ contract CharityFund is Ownable {
             revert RefundIsNotYetAllowed(msg.sender);
         }
         payable(msg.sender).transfer(donatedAmountFrom[msg.sender]);
-        _donatedAmount -= donatedAmountFrom[msg.sender];
-        emit Refund(msg.sender, donatedAmountFrom[msg.sender], _donatedAmount);
+        // this.balance -= donatedAmountFrom[msg.sender];
+        emit Refund(msg.sender, donatedAmountFrom[msg.sender], donatedAmount);
         donatedAmountFrom[msg.sender] = 0;
     }
 
