@@ -14,6 +14,7 @@ error ZeroTargetAmountError(
     string fundCause,
     uint256 timeframe
 );
+error EtherNotSentError(address to, uint256 amount);
 error ZeroDonationAmountError(address sender, uint256 amount);
 error FundTargetExceeded(address sender, uint256 amount);
 error CharityIsFinished(address sender);
@@ -80,7 +81,7 @@ contract CharityFund is Ownable {
         if (msg.value == 0) {
             revert ZeroDonationAmountError(msg.sender, msg.value);
         }
-        if (donatedAmount + msg.value > targetAmount) {
+        if (msg.value > targetAmount - donatedAmount) {
             revert FundTargetExceeded(msg.sender, msg.value);
         }
         donatedAmount += msg.value;
@@ -107,7 +108,12 @@ contract CharityFund is Ownable {
         if (isOpen()) {
             revert CharityIsNotFinished(msg.sender);
         }
-        payable(msg.sender).transfer(address(this).balance);
+        (bool success, ) = payable(msg.sender).call{
+            value: address(this).balance
+        }("");
+        if (!success) {
+            revert EtherNotSentError(msg.sender, address(this).balance);
+        }
         emit Withdraw(msg.sender, address(this).balance);
     }
 
@@ -115,9 +121,13 @@ contract CharityFund is Ownable {
         if (block.timestamp < timeframe) {
             revert RefundIsNotYetAllowed(msg.sender);
         }
-        payable(msg.sender).transfer(donatedAmountFrom[msg.sender]);
-        donatedAmount -= donatedAmountFrom[msg.sender];
-        emit Refund(msg.sender, donatedAmountFrom[msg.sender], donatedAmount);
+        uint256 amountToRefund = donatedAmountFrom[msg.sender];
         donatedAmountFrom[msg.sender] = 0;
+        donatedAmount -= amountToRefund;
+        (bool success, ) = payable(msg.sender).call{value: amountToRefund}("");
+        if (!success) {
+            revert EtherNotSentError(msg.sender, amountToRefund);
+        }
+        emit Refund(msg.sender, amountToRefund, donatedAmount);
     }
 }
